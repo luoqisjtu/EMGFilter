@@ -52,9 +52,11 @@
   </ItemGroup>
   <ItemGroup>
      <Compile Include="Assets\BayesianFilter.cs" />
+     <Compile Include="Assets\ConcurrentQueue.cs" />
      <Compile Include="Assets\EmgModule.cs" />
      <Compile Include="Assets\GlobalVariables.cs" />
      <Compile Include="Assets\MoveRacket.cs" />
+     <Compile Include="Assets\RingBuffer.cs" />
      <Compile Include="Assets\Simulator.cs" />
      <Compile Include="Assets\TargetRacket.cs" />
      <Compile Include="Assets\UdpModule.cs" />

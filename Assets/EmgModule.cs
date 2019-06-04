@@ -4,6 +4,7 @@ using UnityEngine;
 using System.Threading;
 using System.Threading.Tasks;
 using System.IO;
+using System;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -11,7 +12,6 @@ using System.Text;
 public class EmgModule 
 {
 
-    private Thread emgThread;
     private TcpClient commandSocket;
     private TcpClient emgSocket;
     private const int commandPort = 50040;  //server command port
@@ -25,25 +25,26 @@ public class EmgModule
     private bool connected = true; //true if connected to server
     private bool running = false;   //true when acquiring data
 
+	//Create a binary reader to read the data
+	private BinaryReader reader;
+
 
 
     // Use this for initialization
     public void  startEmg () {
-
-        emgThread = new Thread(emgWorker);
-        emgThread.IsBackground = true;
         commandSocket = new TcpClient("127.0.0.1", commandPort);
         emgSocket = new TcpClient("127.0.0.1", emgPort);
         commandStream = commandSocket.GetStream();
         commandReader = new StreamReader(commandStream, Encoding.ASCII);
         commandWriter = new StreamWriter(commandStream, Encoding.ASCII);
         emgStream = emgSocket.GetStream();
+		emgStream.ReadTimeout = 5;    //set timeout
+
         string response = SendCommand(COMMAND_START);
+		reader = new BinaryReader(emgStream);
 
         running = true;
 
-
-        emgThread.Start();
     }
     private string SendCommand(string command)
     {
@@ -71,9 +72,9 @@ public class EmgModule
     {
         running = false;    //no longer running
                             //Wait for threads to terminate
-        emgThread.Join();
-
         //Close all streams and connections
+		reader.Close(); //close the reader. This also disconnects
+
         commandStream.Close();
         commandSocket.Close();
         emgStream.Close();
@@ -88,37 +89,31 @@ public class EmgModule
     void Update () {
 		
 	}
-    private void emgWorker()
+
+    public float getOneSample()
     {
-        emgStream.ReadTimeout = 5;    //set timeout
-
-        //Create a binary reader to read the data
-        BinaryReader reader = new BinaryReader(emgStream);
 
 
 
-        while (running)
+        try
         {
-            try
+            //Demultiplex the data and save for UI display
+            for (int sn = 0; sn < 16; ++sn)
             {
-                //Demultiplex the data and save for UI display
-                for (int sn = 0; sn < 16; ++sn)
-                {
-                    emgData[sn] = reader.ReadSingle();
-                    //Debug.Log(emgData[0]);
-                }
-
-
-            }
-            catch
-            {
-                //ignore timeouts, but force a check of the running flag
+                emgData[sn] = reader.ReadSingle();
+                
             }
 
         }
+		catch (Exception e)
+        {
+			//Debug.Log (e);//ignore timeouts, but force a check of the running flag
+        }
 
-        
-        reader.Close(); //close the reader. This also disconnects
+       
+
+
+		return emgData[0];
         
     }
 

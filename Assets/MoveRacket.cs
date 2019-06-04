@@ -6,30 +6,36 @@ using System.Linq;
 using System.Text;
 using System.Net;
 using System.Net.Sockets;
-using System.Diagnostics;
-//using System.math;
-
 using System.IO;
-using System.Threading.Tasks;
+using System.Threading;
+using DisruptorUnity3d;
 
 public class MoveRacket : MonoBehaviour
 {
 
-    float init_data = 0.0f;
-    float averagefilter = 0.0f;
-    float butterworthfilter = 0.0f;
-    float bayesfilter = 0.0f;
-
-    EmgModule myEmg = new EmgModule();
-    BayesFilter myBayesian = new BayesFilter();
-    Simulator mySimulator = new Simulator();
+	private Thread _queueThread;
 
     public GameObject obj;
     public Renderer rend;
 
+    EmgModule myEmg = new EmgModule();
+	BayesFilter myBayesFilter = new BayesFilter();
+    Simulator mySimulator = new Simulator();
+
+//	float rawEmg = 0.0f;
+	float averagefilter = 0.0f;
+	float butterworthfilter = 0.0f;
+//	float bayesfilter = 0.0f;
+    public float rawEmg;
+    public float bayesfilter;
+    private bool running = false;
+
+    //ring buffer
+    static readonly RingBuffer<float> Queue = new RingBuffer<float>(10);
+
 
     List<float> listToHoldtime;
-    List<float> listToHoldinit_data;
+    List<float> listToHoldrawEmg;
     List<float> listToHoldaveragefilter;
 	List<float> listToHoldbutterworthfilter;
     List<float> listToHoldbayesfilter;
@@ -61,18 +67,22 @@ public class MoveRacket : MonoBehaviour
     {
 
         listToHoldtime = new List<float>();
-        listToHoldinit_data = new List<float>();
+        listToHoldrawEmg = new List<float>();
         listToHoldaveragefilter = new List<float>();
         listToHoldbutterworthfilter = new List<float>();
         listToHoldbayesfilter = new List<float>();
         listToHoldstoredata = new List<float>();
 
-        //thread = new Thread(new ThreadStart(ThreadMethod));
-        //thread.Start();
 
         obj = GameObject.Find("MoveRacket");
 
+        running = true;
+        _queueThread = new Thread(queueWorker);
+        _queueThread.IsBackground = true;
+		_queueThread.Start();
+
         myEmg.startEmg();
+
     }
 
 
@@ -147,64 +157,84 @@ public class MoveRacket : MonoBehaviour
     void FixedUpdate()
     {
 
-        //float init_data = myMode.ChooseMode("real");
-        init_data = ChooseMode("real") ;
+        float rawEmg;
 
-        if (init_data == 0)
-            bayesfilter = 0;
-        else
+        rawEmg = ChooseMode("real");
+
+        while (Queue.TryDequeue(out rawEmg))
         {
-            bayesfilter = (float)(myBayesian.UpdateEst(init_data * 80000 / 25));//200
-         }
+			bayesfilter = myBayesFilter.UpdateEst(Math.Abs(rawEmg) * 6e2f);
+//			Debug.Log(bayesfilter.ToString());
+        }
 
-        averagefilter = EmgAverage(10, Math.Abs(init_data * 80000 / 40));
-        butterworthfilter = ButterworthFilter(init_data * 80000 / 4);
+        averagefilter = EmgAverage(10, Math.Abs(rawEmg * 80000 / 40));
+        butterworthfilter = ButterworthFilter(rawEmg * 80000 / 4);
 
-
-        GetComponent<Rigidbody2D>().position = new Vector2(0, bayesfilter * 30);
+		float barHeight = 0.6e2f * Math.Max(0, (bayesfilter - 0.1f));
+        GetComponent<Rigidbody2D>().position = new Vector2(0, barHeight);
         //Vector2 mousePosition = new Vector2(Input.mousePosition.x, Input.mousePosition.y);
         //GetComponent<Rigidbody2D>().position = new Vector2(0, mousePosition.y);
 
 
         listToHoldtime.Add(Time.time);
-        listToHoldinit_data.Add(init_data);
+        listToHoldrawEmg.Add(rawEmg);
         listToHoldaveragefilter.Add(averagefilter);
 		listToHoldbutterworthfilter.Add(butterworthfilter);
         listToHoldbayesfilter.Add(bayesfilter);
-        listToHoldstoredata.Add(init_data);
 
     }
 
+
+    private void queueWorker()
+    {
+        while (running)
+        {
+            //			Debug.Log ("Here");
+
+            float newEmg = myEmg.getOneSample();
+
+            //			Debug.Log ("Here2");
+
+
+            Queue.Enqueue(newEmg);
+        }
+
+    }
+
+
     private void OnApplicationQuit()
     {
+        running = false;
+
+        //_queueThread.Join ();
         myEmg.stopEmg();
         
 
         string data = "";
         StreamWriter writer = new StreamWriter("test.csv", false, Encoding.UTF8);
-        writer.WriteLine(string.Format("{0},{1},{2},{3},{4}", "time", "init_data", "averagefilter", "butterworthfilter", "bayesfilter"));
+		writer.WriteLine(string.Format("{0},{1},{2},{3},{4}", "time", "rawEmg", "","averagefilter","butterworthfilter","bayesfilter"));
 
         using (var e1 = listToHoldtime.GetEnumerator())
-        using (var e2 = listToHoldinit_data.GetEnumerator())
+        using (var e2 = listToHoldrawEmg.GetEnumerator())
         using (var e3 = listToHoldaveragefilter.GetEnumerator())
         using (var e4 = listToHoldbutterworthfilter.GetEnumerator())
         using (var e5 = listToHoldbayesfilter.GetEnumerator())
         {
-            while (e1.MoveNext() && e2.MoveNext() && e3.MoveNext() && e4.MoveNext() && e5.MoveNext())
+			while (e1.MoveNext() && e2.MoveNext() && e3.MoveNext()&& e4.MoveNext() && e5.MoveNext())
             {
                 var item1 = e1.Current;
                 var item2 = e2.Current;
                 var item3 = e3.Current;
-                var item4 = e4.Current;
-                var item5 = e5.Current;
+				var item4 = e4.Current;
+				var item5 = e5.Current;
                 data += item1.ToString();
                 data += ",";
                 data += item2.ToString();
                 data += ",";
-                data += item3.ToString();
-                data += ",";
-                data += item4.ToString();
-                data += ",";
+				data += item3.ToString();
+				data += ",";
+				data += item4.ToString();
+				data += ",";
                 data += item5.ToString();
                 data += "\n";
                 // use item1 and item2
@@ -231,7 +261,7 @@ public class MoveRacket : MonoBehaviour
 
         writer1.Write(store);
         writer1.Close();
-    
+
     }
 
 
